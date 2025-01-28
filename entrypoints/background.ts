@@ -1,51 +1,68 @@
-// import { openai } from "@ai-sdk/openai"
+import { createOpenAI } from "@ai-sdk/openai"
 import { generateText } from "ai"
-import PouchDB from "pouchdb-browser"
-import { createOpenAI } from '@ai-sdk/openai';
+import PouchDB from "pouchdb"
+import PouchDBFind from 'pouchdb-find'
+import PouchDBIDB from 'pouchdb-adapter-indexeddb'
 
-const openai = createOpenAI({
-  // baseURL: "https://api.deepseek.com",
-  apiKey: "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",
-  // custom settings, e.g.
-  compatibility: 'strict', // strict mode, enable when using the OpenAI API
-});
+PouchDB.plugin(PouchDBIDB)
+PouchDB.plugin(PouchDBFind)
 
-interface Conversation {
+interface Message {
   _id?: string
   _rev?: string
+  conversationId: string
   timestamp: string
-  user: string
-  ai: string
+  role: "user" | "assistant"
+  content: string
 }
 
-const db = new PouchDB<Conversation>("conversations")
+const db = new PouchDB<Message>("messages", {
+  adapter: 'indexeddb'
+})
 
+// Create index for conversationId
+db.createIndex({
+  index: {
+    fields: ['conversationId', 'timestamp'],
+    ddoc: 'conversation-index'
+  }
+}).catch(err => console.error('Error creating index:', err))
 
-async function handleChat(message: string, tabId?: number) {
-  console.log("handleChat", message)
+async function getConversationMessages(conversationId: string): Promise<Message[]> {
+  const result = await db.find({
+    selector: {
+      conversationId: { $eq: conversationId }
+    },
+    fields: ['_id', '_rev', 'conversationId', 'timestamp', 'role', 'content'],
+    sort: [{ conversationId: 'asc' }, { timestamp: 'asc' }]
+  })
+  
+  return result.docs
+}
+
+const openai = createOpenAI({
+  // apiKey: process.env.OPENAI_API_KEY
+  apiKey: "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"
+})
+
+async function handleChat(message: string, conversationId: string, tabId?: number) {
   try {
-    // const apiKey = await getApiKey()
-    // if (!apiKey) {
-    //   sendMessageToPopup({ error: "API key not set. Please set it in the options page." }, tabId)
-    //   return
-    // }
+    // Get conversation history
+    const conversationMessages = await getConversationMessages(conversationId)
+    const messages = conversationMessages.map(msg => ({
+      role: msg.role,
+      content: msg.content
+    }))
+    
+    // Add current message
+    messages.push({ role: "user", content: message })
 
     const result = await generateText({
       model: openai("gpt-4-turbo"),
-      messages: [{ role: "user", content: message }],
-    })
-    console.log("result", result)
-
-    const response = await result.text
-
-    // Save conversation to PouchDB
-    await db.post({
-      timestamp: new Date().toISOString(),
-      user: message,
-      ai: response,
+      messages
     })
 
-    sendMessageToPopup({ response }, tabId)
+    sendMessageToPopup({ response: result.text }, tabId)
   } catch (error) {
     console.error("Error in chat:", error)
     sendMessageToPopup({ error: "An error occurred while processing your request." }, tabId)
@@ -60,22 +77,14 @@ function sendMessageToPopup(message: { response?: string; error?: string }, tabI
   }
 }
 
-async function getApiKey(): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get(["openaiApiKey"], (result) => {
-      resolve(result.openaiApiKey)
-    })
-  })
-}
-
-
 export default defineBackground(() => {
   console.log('Hello background!', { id: chrome.runtime.id });
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log('Received message:', request);
     if (request.type === "chat") {
-      handleChat(request.message, sender.tab?.id)
-      return true // Indicates we will send a response asynchronously
+      handleChat(request.message, request.conversationId, sender.tab?.id)
+      return true
     }
   })
 });

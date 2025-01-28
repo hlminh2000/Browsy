@@ -17,12 +17,17 @@
   "dependencies": {
     "@ai-sdk/openai": "^1.1.5",
     "@tailwindcss/postcss": "^4.0.0",
+    "@types/pouchdb": "^6.4.2",
+    "@types/pouchdb-browser": "^6.1.5",
     "ai": "^4.1.9",
     "events": "^3.3.0",
     "pouchdb": "^9.0.0",
-    "pouchdb-browser": "^9.0.0",
+    "pouchdb-adapter-idb": "^9.0.0",
+    "pouchdb-adapter-indexeddb": "^9.0.0",
+    "pouchdb-find": "^9.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "uuid": "^11.0.5"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.280",
