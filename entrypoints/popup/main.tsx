@@ -1,7 +1,7 @@
 import '../styles.css'
 import React from "react"
 import { createRoot } from 'react-dom/client'
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import PouchDB from "pouchdb"
 import PouchDBFind from 'pouchdb-find'
 import PouchDBIDB from 'pouchdb-adapter-indexeddb'
@@ -54,6 +54,8 @@ function Popup() {
   const [currentConversationId, setCurrentConversationId] = useState(uuidv4())
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const drawerRef = useRef<HTMLDivElement>(null)
+  const hamburgerRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     loadConversations()
@@ -82,6 +84,21 @@ function Popup() {
     chrome.runtime.onMessage.addListener(messageListener)
     return () => chrome.runtime.onMessage.removeListener(messageListener)
   }, [currentConversationId])
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        drawerRef.current && 
+        !drawerRef.current.contains(event.target as Node) &&
+        !hamburgerRef.current?.contains(event.target as Node)
+      ) {
+        setIsDrawerOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   async function loadConversations() {
     try {
@@ -213,7 +230,11 @@ function Popup() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button 
-              onClick={() => setIsDrawerOpen(!isDrawerOpen)}
+              ref={hamburgerRef}
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsDrawerOpen(!isDrawerOpen)
+              }}
               className="p-2 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-100 transition-colors"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -241,46 +262,61 @@ function Popup() {
       </div>
 
       {/* Drawer */}
-      {isDrawerOpen && (
-        <div className="absolute top-[57px] left-0 w-64 h-[calc(100%-57px)] bg-white border-r border-gray-200 shadow-lg z-10 overflow-y-auto">
-          <div className="p-4 space-y-2">
-            {conversations.map(conv => (
-              <div
-                key={conv.id}
-                className={`group relative rounded-lg transition-colors ${
-                  conv.id === currentConversationId
-                    ? "bg-blue-50"
-                    : "hover:bg-gray-50"
-                }`}
+      <div 
+        ref={drawerRef}
+        className={`
+          absolute top-[57px] left-0 w-64 h-[calc(100%-57px)] 
+          bg-white border-r border-gray-200 shadow-lg z-10 
+          transform transition-transform duration-200 ease-in-out
+          ${isDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
+        `}
+      >
+        <div className="p-4 space-y-2">
+          {conversations.map(conv => (
+            <div
+              key={conv.id}
+              className={`group relative rounded-lg transition-colors ${
+                conv.id === currentConversationId
+                  ? "bg-blue-50"
+                  : "hover:bg-gray-50"
+              }`}
+            >
+              <button
+                onClick={() => selectConversation(conv.id)}
+                className="w-full p-3 text-left"
               >
-                <button
-                  onClick={() => selectConversation(conv.id)}
-                  className="w-full p-3 text-left"
-                >
-                  <p className={`text-sm font-medium truncate ${
-                    conv.id === currentConversationId
-                      ? "text-blue-600"
-                      : "text-gray-700"
-                  }`}>{conv.preview}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {new Date(conv.lastMessageAt).toLocaleDateString()}
-                  </p>
-                </button>
-                <button
-                  onClick={(e) => deleteConversation(conv.id, e)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full 
-                    text-gray-400 hover:text-red-500 hover:bg-red-50 
-                    opacity-0 group-hover:opacity-100 transition-all"
-                  title="Delete conversation"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
-                </button>
-              </div>
-            ))}
-          </div>
+                <p className={`text-sm font-medium truncate ${
+                  conv.id === currentConversationId
+                    ? "text-blue-600"
+                    : "text-gray-700"
+                }`}>{conv.preview}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {new Date(conv.lastMessageAt).toLocaleDateString()}
+                </p>
+              </button>
+              <button
+                onClick={(e) => deleteConversation(conv.id, e)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full 
+                  text-gray-400 hover:text-red-500 hover:bg-red-50 
+                  opacity-0 group-hover:opacity-100 transition-all"
+                title="Delete conversation"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
+          ))}
         </div>
+      </div>
+
+      {/* Backdrop */}
+      {isDrawerOpen && (
+        <div 
+          className="absolute inset-0 bg-black bg-opacity-25 z-0 
+            transition-opacity duration-200 ease-in-out"
+          style={{ marginTop: '57px' }}
+        />
       )}
 
       {/* Messages */}
