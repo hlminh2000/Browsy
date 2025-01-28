@@ -111,8 +111,6 @@ function Popup() {
         fields: ['_id', 'conversationId', 'timestamp', 'content'],
         sort: [{ timestamp: 'desc' }]
       })
-
-      console.log(result.docs)
       
       const conversationMap = new Map<string, { preview: string; lastMessageAt: string }>()
       
@@ -170,10 +168,6 @@ function Popup() {
     setMessages([])
   }
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInput(e.target.value)
-  }
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!input.trim()) return
@@ -184,6 +178,8 @@ function Popup() {
       role: "user",
       content: input,
     })
+    await loadSavedMessages(currentConversationId)
+
     setInput("")
 
     chrome.runtime.sendMessage({ 

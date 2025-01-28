@@ -1,8 +1,10 @@
 import { createOpenAI } from "@ai-sdk/openai"
-import { generateText } from "ai"
+import { generateText, tool } from "ai"
 import PouchDB from "pouchdb"
 import PouchDBFind from 'pouchdb-find'
 import PouchDBIDB from 'pouchdb-adapter-indexeddb'
+import { onMessage, sendMessage } from "webext-bridge/background";
+import { z } from "zod"
 
 PouchDB.plugin(PouchDBIDB)
 PouchDB.plugin(PouchDBFind)
@@ -71,6 +73,7 @@ async function getApiKey(): Promise<string | null> {
 
 async function handleChat(message: string, conversationId: string, tabId?: number) {
   try {
+    console.log("handleChat: ", message, conversationId, tabId)
     const apiKey = await getApiKey()
     if (!apiKey) {
       sendMessageToPopup({ error: "Please set your OpenAI API key in the options page." }, tabId)
@@ -91,10 +94,30 @@ async function handleChat(message: string, conversationId: string, tabId?: numbe
 
     const result = await generateText({
       model: openai("gpt-4-turbo"),
-      system: "You are a browser assistant. Your job is to assist the user with perform tasks in the browser, such as booking a flight, or finding a restaurant, etc...",
+      system: `
+It is ${new Date().toISOString()}. You are a browser assistant. Your job is to assist the user with perform tasks in the browser, such as booking a flight, or finding a restaurant, etc...
+You think through your actions one step at a time, and act accordingly to each step.
+`,
+      tools: {
+        getCurrentTabContent: tool({
+          description: "Get the content of the current tab",
+          parameters: z.object({}),
+          execute: async () => {
+            // const tab = await chrome.tabs.query({ active: true, currentWindow: true })
+            // const tabId = tab[0].id
+            // if (!tabId) return "No active tab"
+            // const content = await chrome.tabs.sendMessage(tabId, { type: "get_content" })
+            return "this is a website about cats"
+          }
+        })
+      },
       messages,
-      maxSteps: 10
+      maxSteps: 10,
+      onStepFinish: (step) => {
+        console.log("step: ", step)
+      }
     })
+    console.log("result: ", result)
 
     sendMessageToPopup({ response: result.text }, tabId)
   } catch (error) {
@@ -112,10 +135,8 @@ function sendMessageToPopup(message: { response?: string; error?: string }, tabI
 }
 
 export default defineBackground(() => {
-  console.log('Hello background!', { id: chrome.runtime.id });
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('Received message:', request);
     if (request.type === "chat") {
       handleChat(request.message, request.conversationId, sender.tab?.id)
       return true
