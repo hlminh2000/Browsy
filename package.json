@@ -18,6 +18,7 @@
     "@ai-sdk/openai": "^1.1.5",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/pouchdb": "^6.4.2",
+    "@types/pouchdb-adapter-indexeddb": "^9.0.0",
     "@types/pouchdb-browser": "^6.1.5",
     "ai": "^4.1.9",
     "events": "^3.3.0",
