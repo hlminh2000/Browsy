@@ -20,6 +20,17 @@ const db = new PouchDB<Message>("messages", {
   adapter: 'indexeddb'
 })
 
+interface Settings {
+  _id?: string
+  _rev?: string
+  type: 'settings'
+  apiKey: string
+}
+
+const settingsDb = new PouchDB<Settings>("settings", {
+  adapter: 'indexeddb'
+})
+
 // Create index for conversationId
 db.createIndex({
   index: {
@@ -40,13 +51,34 @@ async function getConversationMessages(conversationId: string): Promise<Message[
   return result.docs
 }
 
-const openai = createOpenAI({
-  // apiKey: process.env.OPENAI_API_KEY
-  apiKey: "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"
-})
+async function getApiKey(): Promise<string | null> {
+  try {
+    const result = await settingsDb.find({
+      selector: {
+        type: 'settings'
+      }
+    })
+    
+    if (result.docs.length > 0) {
+      return result.docs[0].apiKey
+    }
+    return null
+  } catch (error) {
+    console.error("Error getting API key:", error)
+    return null
+  }
+}
 
 async function handleChat(message: string, conversationId: string, tabId?: number) {
   try {
+    const apiKey = await getApiKey()
+    if (!apiKey) {
+      sendMessageToPopup({ error: "Please set your OpenAI API key in the options page." }, tabId)
+      return
+    }
+
+    const openai = createOpenAI({ apiKey })
+
     // Get conversation history
     const conversationMessages = await getConversationMessages(conversationId)
     const messages = conversationMessages.map(msg => ({
