@@ -91,7 +91,9 @@ async function handleChat(message: string, conversationId: string, tabId?: numbe
 
     const result = await generateText({
       model: openai("gpt-4-turbo"),
-      messages
+      system: "You are a browser assistant. Your job is to assist the user with perform tasks in the browser, such as booking a flight, or finding a restaurant, etc...",
+      messages,
+      maxSteps: 10
     })
 
     sendMessageToPopup({ response: result.text }, tabId)
