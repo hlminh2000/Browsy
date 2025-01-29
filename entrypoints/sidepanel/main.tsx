@@ -58,6 +58,7 @@ function Popup() {
   const hamburgerRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
+    loadConversations()
     loadSavedMessages(currentConversationId)
 
     const messageListener = (message: any) => {
@@ -98,13 +99,6 @@ function Popup() {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
-
-  // Add effect to load conversations when drawer opens
-  useEffect(() => {
-    if (isDrawerOpen) {
-      loadConversations()
-    }
-  }, [isDrawerOpen])
 
   async function loadConversations() {
     try {
