@@ -3,47 +3,28 @@ import React from "react"
 import { createRoot } from 'react-dom/client'
 import { useState, useEffect, useRef } from "react"
 import { v4 as uuidv4 } from 'uuid'
-import PouchDB from 'pouchdb'
+import PouchDB from "pouchdb"
 import PouchDBFind from 'pouchdb-find'
+import PouchDBIDB from 'pouchdb-adapter-indexeddb'
+import { Message, messagesDb } from '@/common/db'
+import ReactMarkdown from 'react-markdown'
 
-interface Message {
-  _id?: string
-  _rev?: string
-  conversationId: string
-  timestamp: string
-  role: "user" | "assistant" | "system" | "function"
-  content: string
-  id?: string
-  name?: string
-  function_call?: {
-    name: string
-    arguments: string
+PouchDB.plugin(PouchDBIDB)
+PouchDB.plugin(PouchDBFind)
+
+// Create index for timestamp
+messagesDb.createIndex({
+  index: {
+    fields: ['timestamp', 'conversationId'],
+    ddoc: 'timestamp-index'
   }
-}
+}).catch(err => console.error('Error creating index:', err))
 
 interface Conversation {
   id: string
   preview: string
   lastMessageAt: string
 }
-
-// Initialize PouchDB and create indexes
-const messagesDb = new PouchDB<Message>("messages", { adapter: 'indexeddb' })
-
-// Create index for conversationId and timestamp
-messagesDb.createIndex({
-  index: {
-    fields: ['conversationId', 'timestamp'],
-    ddoc: 'conversation-index'
-  }
-}).catch(err => console.error('Error creating index:', err))
-
-messagesDb.createIndex({
-  index: {
-    fields: ['timestamp'],
-    ddoc: 'timestamp-index'
-  }
-}).catch(err => console.error('Error creating index:', err))
 
 function Popup() {
   const [messages, setMessages] = useState<Message[]>([])
@@ -56,20 +37,40 @@ function Popup() {
   const hamburgerRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
+    // Load latest conversation first
+    const loadLatestConversation = async () => {
+      try {
+        const result = await messagesDb.find({
+          selector: {
+            timestamp: { $gt: null },
+            conversationId: { $gt: null }
+          },
+          fields: ['conversationId', 'timestamp'],
+          sort: [{ timestamp: 'desc' }],
+          limit: 1
+        })
+
+        if (result.docs.length > 0) {
+          setCurrentConversationId(result.docs[0].conversationId)
+        }
+      } catch (error) {
+        console.error('Error loading latest conversation:', error)
+      }
+    }
+
+    loadLatestConversation()
+  }, [])
+
+  useEffect(() => {
+    // Manages message handling, conversation state, and cleanup
     loadConversations()
     loadSavedMessages(currentConversationId)
 
     const messageListener = (message: any) => {
+      console.log("message: ", message)
       if (message.type === "chat_response") {
-        if (message.error || message.response) {
-          loadSavedMessages(currentConversationId)
-        }
+        loadSavedMessages(currentConversationId)
         setIsLoading(false)
-        loadSavedMessages(currentConversationId)
-      } else if (message.type === "message_saved") {
-        loadSavedMessages(currentConversationId)
-      } else if (message.type === "conversations_loaded") {
-        setConversations(message.conversations)
       } else if (message.type === "conversation_deleted") {
         if (message.success) {
           if (currentConversationId === message.conversationId) {
@@ -85,6 +86,7 @@ function Popup() {
   }, [currentConversationId])
 
   useEffect(() => {
+    // Handles click-outside behavior for the drawer component
     function handleClickOutside(event: MouseEvent) {
       if (
         drawerRef.current && 
@@ -99,8 +101,45 @@ function Popup() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  function loadConversations() {
-    chrome.runtime.sendMessage({ type: "load_conversations" })
+  useEffect(() => {
+    // Loads conversations when the drawer is opened
+    if (isDrawerOpen) {
+      loadConversations()
+    }
+  }, [isDrawerOpen])
+
+  async function loadConversations() {
+    try {
+      const result = await messagesDb.find({
+        selector: {
+          timestamp: { $gt: null },
+          conversationId: { $gt: null }
+        },
+        fields: ['_id', 'conversationId', 'timestamp', 'content'],
+        sort: [{ timestamp: 'desc' }]
+      })
+      
+      const conversationMap = new Map<string, { preview: string; lastMessageAt: string }>()
+      
+      result.docs.forEach(message => {
+        if (!conversationMap.has(message.conversationId)) {
+          conversationMap.set(message.conversationId, {
+            preview: message.content,
+            lastMessageAt: new Date(message.timestamp).toISOString()
+          })
+        }
+      })
+
+      const conversations = Array.from(conversationMap.entries()).map(([id, data]) => ({
+        id,
+        preview: data.preview,
+        lastMessageAt: data.lastMessageAt
+      }))
+
+      setConversations(conversations)
+    } catch (error) {
+      console.error('Error loading conversations:', error)
+    }
   }
 
   const selectConversation = (conversationId: string) => {
@@ -108,16 +147,24 @@ function Popup() {
     setIsDrawerOpen(false)
   }
 
-  function loadSavedMessages(conversationId: string) {
-    chrome.runtime.sendMessage({ 
-      type: "load_messages", 
-      conversationId 
-    })
+  async function loadSavedMessages(conversationId: string) {
+    try {
+      const result = await messagesDb.find({
+        selector: {
+          conversationId: conversationId
+        },
+      })
+      setMessages(result.docs)
+    } catch (error) {
+      console.error('Error loading messages:', error)
+    }
   }
 
   const startNewConversation = () => {
-    setCurrentConversationId(uuidv4())
+    const newConversationId = uuidv4()
+    setCurrentConversationId(newConversationId)
     setMessages([])
+    loadSavedMessages(newConversationId)
   }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -125,16 +172,13 @@ function Popup() {
     if (!input.trim()) return
 
     setIsLoading(true)
-    chrome.runtime.sendMessage({
-      type: "save_message",
-      message: {
-        conversationId: currentConversationId,
-        role: "user",
-        content: input,
-      }
-    })
-
     setInput("")
+    setMessages(prev => [...prev, {
+      content: input,
+      conversationId: currentConversationId,
+      role: "user",
+      timestamp: Date.now()
+    }])
 
     chrome.runtime.sendMessage({ 
       type: "chat", 
@@ -152,7 +196,7 @@ function Popup() {
   }
 
   return (
-    <div className="w-[400px] h-[600px] flex flex-col bg-gray-50 relative">
+    <div className="w-full h-full flex flex-col bg-gray-50 relative">
       {/* Header */}
       <div className="px-4 py-3 bg-white border-b border-gray-200 shadow-sm">
         <div className="flex items-center justify-between">
@@ -178,13 +222,12 @@ function Popup() {
           </div>
           <button 
             onClick={() => chrome.runtime.openOptionsPage()} 
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-100 transition-colors"
+            className="flex items-center gap-1.5 p-2 text-sm text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-100 transition-colors"
             title="Open Settings"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
             </svg>
-            Settings
           </button>
         </div>
       </div>
@@ -249,9 +292,9 @@ function Popup() {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
-        {messages.map((message) => (
+        {messages.map((message, i) => (
           <div
-            key={message._id}
+            key={`${message.conversationId}_${i}`}
             className={`flex ${message.role === "user" ? "justify-end" : "justify-start"} w-full`}
           >
             <div
@@ -261,10 +304,11 @@ function Popup() {
                   ? "bg-blue-500 text-white" 
                   : "bg-white border border-gray-200"
                 }
-                shadow-sm
+                shadow-sm prose prose-sm max-w-none
+                ${message.role === "user" ? "prose-invert" : ""}
               `}
             >
-              <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+              <ReactMarkdown>{message.content}</ReactMarkdown>
             </div>
           </div>
         ))}

@@ -65,7 +65,7 @@ function getInteractiveElements() {
       xpath: getXPath(el),
       tag: el.tagName.toLowerCase(),
       // attributes: Array.from(el.attributes)
-      //   .filter(attr => !['class', 'style'].includes(attr.name))
+      //   // .filter(attr => !['class', 'style'].includes(attr.name))
       //   .reduce((obj, attr) => {
       //     obj[attr.name] = attr.value;
       //     return obj;
@@ -77,30 +77,40 @@ export default defineContentScript({
   matches: ['<all_urls>'],
   main(ctx) {
     chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
+      console.log("request: ", request)
+      let response: any
       if (request.type === "get_page_content") {
-        return sendResponse(document.body.innerText);
+        response = document.body.innerText;
       }
-      if (request.type === "get_interactive_elements") {
+      else if (request.type === "get_interactive_elements") {
         const interactiveElements = getInteractiveElements()
-        return sendResponse(interactiveElements);
+        response = interactiveElements;
       }
-      if (request.type === "perform_action") {
+      else if (request.type === "perform_action") {
         const { action, elementXpah, value } = request
-        const element = document.evaluate(elementXpah, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue as HTMLElement
-        if(action === "click") {
+        const element = document.evaluate(
+          elementXpah,
+          document,
+          null,
+          XPathResult.FIRST_ORDERED_NODE_TYPE,
+          null
+        ).singleNodeValue as HTMLElement
+        if (action === "click") {
           element.click()
         } else if (action === "type") {
-          for (const char in value) {
-            element.dispatchEvent(new KeyboardEvent('keydown', { key: char }))
-            element.dispatchEvent(new KeyboardEvent('keypress', { key: char }))
-            element.dispatchEvent(new KeyboardEvent('keyup', { key: char }))
-            await new Promise(resolve => setTimeout(resolve, 200))
+          (element as HTMLInputElement).value = ""
+          await new Promise(resolve => setTimeout(resolve, 100))
+          for (const char of value) {
+            (element as HTMLInputElement).value += char
+            await new Promise(resolve => setTimeout(resolve, 100))
           }
         } else if (action === "submit") {
           (element as HTMLFormElement).submit()
         }
-        return sendResponse(document.title);
+        response = document.title;
       }
+      console.log("response: ", response)
+      return sendResponse(response)
     })
   },
 });

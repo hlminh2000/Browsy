@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai"
-import { generateText, tool, Message as AiMessage } from "ai"
+import { generateText, tool, Message as AiMessage, generateObject } from "ai"
 import PouchDB from "pouchdb"
 import PouchDBFind from 'pouchdb-find'
 import PouchDBIDB from 'pouchdb-adapter-indexeddb'
@@ -82,7 +82,7 @@ async function handleChat(message: string, conversationId: string, tabId?: numbe
     const result = await generateText({
       model: openai("gpt-4o-mini"),
       system: `
-It is ${new Date().toISOString()}. You are a browser assistant. Your job is to assist the user with perform tasks in the browser, such as booking a flight, or finding a restaurant, etc...
+It is ${new Date().toISOString()}. You are in Canada. You are a friendly browser assistant. Your job is to assist the user with perform tasks in the browser, such as booking a flight, or finding a restaurant, etc...
 You think through your actions one step at a time, and act accordingly to each step.
 Use the tools available for you tonavigate, perform actions and collect relevant information from the webpage.
 `,
@@ -99,7 +99,6 @@ Use the tools available for you tonavigate, perform actions and collect relevant
 
             try {
               const pageContent = await chrome.tabs.sendMessage(tabId, { type: "get_page_content" })
-              console.log("pageContent: ", pageContent)
               return pageContent
             } catch (error) {
               console.error("Error getting page content:", error)
@@ -107,27 +106,50 @@ Use the tools available for you tonavigate, perform actions and collect relevant
             }
           }
         }),
+        planStrategy: tool({
+          description: "Use this tool to get a plan of how you will perform a task",
+          parameters: z.object({
+            task: z.string().describe("The task you are trying to perform"),
+          }),
+          execute: async ({ task }) => {
+            const { object: { plan } } = await generateObject({
+              model: openai("gpt-4o-mini"),
+              schema: z.object({
+                plan: z.array(z.string()).describe("The sequential steps to take").max(10)
+              }),
+              system: `
+You are a component of a browser assia
+`
+            })
+            return plan
+          }
+        }),
         decideAction: tool({
           description: "Use this tool to decide which action to take next",
           parameters: z.object({
             pageContent: z.string().describe("The content of the page"),
-            requeast: z.string().describe("The request you are trying to fulfill"),
+            request: z.string().describe("The request you are trying to fulfill"),
+            interactiveElements: z.array(z.object({
+              text: z.string().optional(),
+              xpath: z.string(),
+              tag: z.string(),
+              attributes: z.record(z.string()),
+            })).describe("Interactive elements identified by the getInteractiveElements tool.")
           }),
-          execute: async ({ pageContent, requeast }) => {
+          execute: async ({ pageContent, request }) => {
             const { text } = await generateText({
               model: openai("gpt-4o-mini"),
               system: `
 You are an expert model specialized in deciding which action to take next on a webpage, based on a user's request.
 Do not perform the task, only provide the appropriate step to take. 
 Examples: "Submit the form", "Fill the name field", etc...
-If no action is needed, say "No action needed"
-============== Webpage content ==============
+If no action is needed, say "No action needed".
+============================ Webpage content ============================
 ${pageContent}
-=============================================
+=========================================================================
 `,
-              messages: [{ role: "user", content: requeast } ]
+              messages: [{ role: "user", content: request } ]
             })
-            console.log("next step: ", text)
             return text
           }
         }),
@@ -139,7 +161,6 @@ ${pageContent}
             if (!activeTab) return "No active tab"
             try {
               const elements = await chrome.tabs.sendMessage(activeTab.id as number, { type: "get_interactive_elements" })
-              console.log("elements: ", elements)
               return elements
             } catch (error) {
               console.error("Error getting page content:", error)
@@ -165,24 +186,48 @@ ${pageContent}
                 action,
                 value,
               })
-              return "Action performed successfully"
+              await new Promise(resolve => setTimeout(resolve, 2000))
+              return await await chrome.tabs.sendMessage(activeTab.id as number, { type: "get_interactive_elements" })
             } catch (error) {
               console.error("Error performing action:", error)
               return "Error: Could not perform action"
             }
           }
-        })
+        }),
+        navigateToUrl: tool({
+          description: "Use this tool to navigate to a URL",
+          parameters: z.object({
+            url: z.string().describe("The URL to navigate to"),
+          }),
+          execute: async ({ url }) => {
+            const activeTab = await getActiveTab();
+            if (!activeTab) return "No active tab"
+            try {
+              return new Promise(async (resolve) => {
+                const onUpdate = async function (tabId: number, info: {status?: string}) {
+                  if (info.status === 'complete' && tabId === activeTab.id) {
+                    resolve( await chrome.tabs.sendMessage(activeTab.id as number, { type: "get_interactive_elements" }) )
+                    chrome.tabs.onUpdated.removeListener(onUpdate);
+                  }
+                }
+                chrome.tabs.onUpdated.addListener(onUpdate);
+                await chrome.tabs.update(activeTab.id as number, { url })
+              })
+            } catch (error) {
+              console.error("Error navigating to URL:", error)
+              return "Error: Could not navigate to URL"
+            }
+          }
+        }),
       },
       messages: messages.map(msg => ({
         role: msg.role === 'function' ? 'tool' : msg.role,
         content: msg.content,
       })) as AiMessage[],
-      maxSteps: 10,
+      maxSteps: 20,
       onStepFinish: (step) => {
-        console.log("step: ", step)
       }
     })
-    console.log("result: ", result)
 
     await saveMessage({
       content: result.text,
@@ -241,6 +286,11 @@ async function deleteConversation(conversationId: string) {
 }
 
 export default defineBackground(() => {
+  chrome.runtime.onInstalled.addListener(() => {
+    chrome.sidePanel.setOptions({ path: "sidepanel.html" });
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  });
+
   chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     if (request.type === "chat") {
       await handleChat(request.message, request.conversationId, sender.tab?.id)

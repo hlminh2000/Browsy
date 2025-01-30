@@ -1,10 +1,12 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
-    "./entrypoints/**/*.{js,ts,jsx,tsx}",
+    "./entrypoints/**/*.{html,js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {},
   },
-  plugins: [],
-} 
+  plugins: [
+    require('@tailwindcss/typography'),
+  ],
+}

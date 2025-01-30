@@ -7,6 +7,7 @@ import PouchDB from "pouchdb"
 import PouchDBFind from 'pouchdb-find'
 import PouchDBIDB from 'pouchdb-adapter-indexeddb'
 import { Message, messagesDb } from '@/common/db'
+import ReactMarkdown from 'react-markdown'
 
 PouchDB.plugin(PouchDBIDB)
 PouchDB.plugin(PouchDBFind)
@@ -36,8 +37,32 @@ function Popup() {
   const hamburgerRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    // Manages message handling, conversation state, and cleanup
+    // Load latest conversation first
+    const loadLatestConversation = async () => {
+      try {
+        const result = await messagesDb.find({
+          selector: {
+            timestamp: { $gt: null },
+            conversationId: { $gt: null }
+          },
+          fields: ['conversationId', 'timestamp'],
+          sort: [{ timestamp: 'desc' }],
+          limit: 1
+        })
 
+        if (result.docs.length > 0) {
+          setCurrentConversationId(result.docs[0].conversationId)
+        }
+      } catch (error) {
+        console.error('Error loading latest conversation:', error)
+      }
+    }
+
+    loadLatestConversation()
+  }, [])
+
+  useEffect(() => {
+    // Manages message handling, conversation state, and cleanup
     loadConversations()
     loadSavedMessages(currentConversationId)
 
@@ -136,8 +161,10 @@ function Popup() {
   }
 
   const startNewConversation = () => {
-    setCurrentConversationId(uuidv4())
+    const newConversationId = uuidv4()
+    setCurrentConversationId(newConversationId)
     setMessages([])
+    loadSavedMessages(newConversationId)
   }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -277,10 +304,11 @@ function Popup() {
                   ? "bg-blue-500 text-white" 
                   : "bg-white border border-gray-200"
                 }
-                shadow-sm
+                shadow-sm prose prose-sm max-w-none
+                ${message.role === "user" ? "prose-invert" : ""}
               `}
             >
-              <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+              <ReactMarkdown>{message.content}</ReactMarkdown>
             </div>
           </div>
         ))}
