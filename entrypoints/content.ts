@@ -9,10 +9,13 @@ export default defineContentScript({
     console.log('Hello content.');
     console.log(ctx);
 
+    onMessage(ctx, async (message) => {
+      console.log("message: ", message)
+    })
+
     onMessage("GET_CONTENT", async (message) => {
       const {
         sender,
-        // data: { ignoreCasing },
       } = message;
 
       console.log(sender.context, sender.tabId); // > devtools  156
@@ -24,6 +27,6 @@ export default defineContentScript({
       );
     });
 
-    
+
   },
 });

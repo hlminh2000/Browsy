@@ -2,22 +2,23 @@ import '../styles.css'
 import React from "react"
 import { createRoot } from 'react-dom/client'
 import { useState, useEffect, useRef } from "react"
-import PouchDB from "pouchdb"
-import PouchDBFind from 'pouchdb-find'
-import PouchDBIDB from 'pouchdb-adapter-indexeddb'
 import { v4 as uuidv4 } from 'uuid'
-
-// Use IndexedDB adapter
-PouchDB.plugin(PouchDBIDB)
-PouchDB.plugin(PouchDBFind)
+import PouchDB from 'pouchdb'
+import PouchDBFind from 'pouchdb-find'
 
 interface Message {
   _id?: string
   _rev?: string
   conversationId: string
   timestamp: string
-  role: "user" | "assistant"
+  role: "user" | "assistant" | "system" | "function"
   content: string
+  id?: string
+  name?: string
+  function_call?: {
+    name: string
+    arguments: string
+  }
 }
 
 interface Conversation {
@@ -26,26 +27,23 @@ interface Conversation {
   lastMessageAt: string
 }
 
-// Create the database with explicit adapter
-const db = new PouchDB<Message>("messages", {
-  adapter: 'indexeddb'
-})
+// Initialize PouchDB and create indexes
+const messagesDb = new PouchDB<Message>("messages", { adapter: 'indexeddb' })
 
-// Create index for conversationId
-db.createIndex({
+// Create index for conversationId and timestamp
+messagesDb.createIndex({
   index: {
     fields: ['conversationId', 'timestamp'],
     ddoc: 'conversation-index'
   }
 }).catch(err => console.error('Error creating index:', err))
 
-// First, add a new index for conversations list
-db.createIndex({
+messagesDb.createIndex({
   index: {
     fields: ['timestamp'],
     ddoc: 'timestamp-index'
   }
-}).catch(err => console.error('Error creating timestamp index:', err))
+}).catch(err => console.error('Error creating index:', err))
 
 function Popup() {
   const [messages, setMessages] = useState<Message[]>([])
@@ -63,21 +61,22 @@ function Popup() {
 
     const messageListener = (message: any) => {
       if (message.type === "chat_response") {
-        if (message.error) {
-          saveMessage({
-            conversationId: currentConversationId,
-            role: "assistant",
-            content: message.error,
-          })
-        } else if (message.response) {
-          saveMessage({
-            conversationId: currentConversationId,
-            role: "assistant",
-            content: message.response,
-          })
+        if (message.error || message.response) {
+          loadSavedMessages(currentConversationId)
         }
         setIsLoading(false)
         loadSavedMessages(currentConversationId)
+      } else if (message.type === "message_saved") {
+        loadSavedMessages(currentConversationId)
+      } else if (message.type === "conversations_loaded") {
+        setConversations(message.conversations)
+      } else if (message.type === "conversation_deleted") {
+        if (message.success) {
+          if (currentConversationId === message.conversationId) {
+            startNewConversation()
+          }
+          loadConversations()
+        }
       }
     }
 
@@ -100,39 +99,8 @@ function Popup() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  async function loadConversations() {
-    try {
-      const result = await db.find({
-        selector: {
-          timestamp: { $gt: null },
-          conversationId: { $gt: null }
-        },
-        use_index: 'timestamp-index',
-        fields: ['_id', 'conversationId', 'timestamp', 'content'],
-        sort: [{ timestamp: 'desc' }]
-      })
-      
-      const conversationMap = new Map<string, { preview: string; lastMessageAt: string }>()
-      
-      result.docs.forEach(message => {
-        if (!conversationMap.has(message.conversationId)) {
-          conversationMap.set(message.conversationId, {
-            preview: message.content,
-            lastMessageAt: message.timestamp
-          })
-        }
-      })
-
-      const conversationList = Array.from(conversationMap.entries()).map(([id, data]) => ({
-        id,
-        preview: data.preview,
-        lastMessageAt: data.lastMessageAt
-      }))
-
-      setConversations(conversationList)
-    } catch (error) {
-      console.error("Error loading conversations:", error)
-    }
+  function loadConversations() {
+    chrome.runtime.sendMessage({ type: "load_conversations" })
   }
 
   const selectConversation = (conversationId: string) => {
@@ -140,27 +108,11 @@ function Popup() {
     setIsDrawerOpen(false)
   }
 
-  async function saveMessage(message: Omit<Message, "_id" | "_rev" | "timestamp">) {
-    await db.post({
-      ...message,
-      timestamp: new Date().toISOString(),
+  function loadSavedMessages(conversationId: string) {
+    chrome.runtime.sendMessage({ 
+      type: "load_messages", 
+      conversationId 
     })
-  }
-
-  async function loadSavedMessages(conversationId: string) {
-    try {
-      const result = await db.find({
-        selector: {
-          conversationId: { $eq: conversationId }
-        },
-        fields: ['_id', '_rev', 'conversationId', 'timestamp', 'role', 'content'],
-        sort: [{ conversationId: 'asc' }, { timestamp: 'asc' }]
-      })
-      
-      setMessages(result.docs)
-    } catch (error) {
-      console.error("Error loading messages:", error)
-    }
   }
 
   const startNewConversation = () => {
@@ -173,12 +125,14 @@ function Popup() {
     if (!input.trim()) return
 
     setIsLoading(true)
-    await saveMessage({
-      conversationId: currentConversationId,
-      role: "user",
-      content: input,
+    chrome.runtime.sendMessage({
+      type: "save_message",
+      message: {
+        conversationId: currentConversationId,
+        role: "user",
+        content: input,
+      }
     })
-    await loadSavedMessages(currentConversationId)
 
     setInput("")
 
@@ -189,34 +143,12 @@ function Popup() {
     })
   }
 
-  async function deleteConversation(conversationId: string, e: React.MouseEvent) {
-    e.stopPropagation() // Prevent conversation selection when clicking delete
-    try {
-      // Get all messages for this conversation
-      const result = await db.find({
-        selector: {
-          conversationId: { $eq: conversationId }
-        },
-        fields: ['_id', '_rev']
-      })
-
-      // Delete all messages
-      await Promise.all(
-        result.docs.map(doc => 
-          db.remove(doc._id!, doc._rev!)
-        )
-      )
-
-      // If current conversation was deleted, start a new one
-      if (currentConversationId === conversationId) {
-        startNewConversation()
-      }
-
-      // Refresh conversations list
-      loadConversations()
-    } catch (error) {
-      console.error("Error deleting conversation:", error)
-    }
+  const deleteConversation = (conversationId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    chrome.runtime.sendMessage({
+      type: "delete_conversation",
+      conversationId
+    })
   }
 
   return (
