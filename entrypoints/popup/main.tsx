@@ -215,7 +215,7 @@ function Popup() {
           ${isDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
       >
-        <div className="p-4 space-y-2">
+        <div className="h-full overflow-y-auto p-4 space-y-2">
           {conversations.map(conv => (
             <div
               key={conv.id}

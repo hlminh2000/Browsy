@@ -39,17 +39,23 @@ async function getApiKey(): Promise<string | null> {
   }
 }
 
+const getActiveTab = async () => {
+  const currentWindow = await chrome.windows.getCurrent()
+  const [tab] = await chrome.tabs.query({ windowId: currentWindow.id, active: true })
+  return tab
+}
+
 async function handleChat(message: string, conversationId: string, tabId?: number) {
   try {
     const apiKey = await getApiKey()
-    
+
     // Save user message first
     await saveMessage({
       content: message,
       role: "user" as const,
       conversationId,
     })
-    
+
     if (!apiKey) {
       const errorMessage = {
         content: "Please set your OpenAI API key in the options page.",
@@ -74,20 +80,96 @@ async function handleChat(message: string, conversationId: string, tabId?: numbe
     ]
 
     const result = await generateText({
-      model: openai("gpt-4-turbo"),
+      model: openai("gpt-4o-mini"),
       system: `
 It is ${new Date().toISOString()}. You are a browser assistant. Your job is to assist the user with perform tasks in the browser, such as booking a flight, or finding a restaurant, etc...
 You think through your actions one step at a time, and act accordingly to each step.
+Use the tools available for you tonavigate, perform actions and collect relevant information from the webpage.
 `,
       tools: {
         getCurrentTabContent: tool({
-          description: "Get the content of the current tab",
+          description: "Use this to get the current content of the page, useful for answer user questions, or observing the page before and after performAction tool.",
           parameters: z.object({}),
           execute: async () => {
-            // const tab = await chrome.tabs.query({ active: true, currentWindow: true })
-            // const [{ id: tabId }] = tab
-            // if (!tabId) return "No active tab" as string
-            return "this is a website about cats" as string
+            const currentWindow = await chrome.windows.getCurrent()
+            const tabs = await chrome.tabs.query({ windowId: currentWindow.id, active: true })
+            if (!tabs.length) return "No active tab"
+            const [{ id: tabId }] = tabs
+            if (!tabId) return "Invalid tab ID"
+
+            try {
+              const pageContent = await chrome.tabs.sendMessage(tabId, { type: "get_page_content" })
+              console.log("pageContent: ", pageContent)
+              return pageContent
+            } catch (error) {
+              console.error("Error getting page content:", error)
+              return "Error: Could not retrieve page content"
+            }
+          }
+        }),
+        decideAction: tool({
+          description: "Use this tool to decide which action to take next",
+          parameters: z.object({
+            pageContent: z.string().describe("The content of the page"),
+            requeast: z.string().describe("The request you are trying to fulfill"),
+          }),
+          execute: async ({ pageContent, requeast }) => {
+            const { text } = await generateText({
+              model: openai("gpt-4o-mini"),
+              system: `
+You are an expert model specialized in deciding which action to take next on a webpage, based on a user's request.
+Do not perform the task, only provide the appropriate step to take. 
+Examples: "Submit the form", "Fill the name field", etc...
+If no action is needed, say "No action needed"
+============== Webpage content ==============
+${pageContent}
+=============================================
+`,
+              messages: [{ role: "user", content: requeast } ]
+            })
+            console.log("next step: ", text)
+            return text
+          }
+        }),
+        getInteractiveElements: tool({
+          description: "Use this to get a list of interactive elements in the page",
+          parameters: z.object({}),
+          execute: async () => {
+            const activeTab = await getActiveTab();
+            if (!activeTab) return "No active tab"
+            try {
+              const elements = await chrome.tabs.sendMessage(activeTab.id as number, { type: "get_interactive_elements" })
+              console.log("elements: ", elements)
+              return elements
+            } catch (error) {
+              console.error("Error getting page content:", error)
+              return "Error: Could not retrieve page content"
+            }
+          }
+        }),
+        performAction: tool({
+          description: "Use this tool to perform an action on the active page, as suggested by decideAction",
+          parameters: z.object({
+            elementXpah: z.string().describe("The xpath of the element to interact with, based on result of getInteractiveElements tool"),
+            action: z.enum(["click", "type", "submit"]),
+            value: z.string().optional(),
+          }),
+          execute: async ({ elementXpah, action, value }) => {
+            const activeTab = await getActiveTab();
+            if (!activeTab) return "No active tab"
+            // chrome.debugger.sendCommand({tabId: activeTab.id}, "")
+            try {
+              await chrome.tabs.sendMessage(activeTab.id as number, {
+                type: "perform_action",
+                elementXpah,
+                action,
+                value,
+              })
+              return "Action performed successfully"
+            } catch (error) {
+              console.error("Error performing action:", error)
+              return "Error: Could not perform action"
+            }
           }
         })
       },
@@ -109,17 +191,17 @@ You think through your actions one step at a time, and act accordingly to each s
     })
 
     sendMessageToPopup({
-      content: result.text, 
-      role: "assistant", 
-      conversationId, 
+      content: result.text,
+      role: "assistant",
+      conversationId,
       timestamp: Date.now(),
     }, tabId)
   } catch (error) {
     console.error("Error in chat:", error)
-    sendMessageToPopup({ 
-      content: "An error occurred while processing your request.", 
-      role: "assistant", 
-      conversationId, 
+    sendMessageToPopup({
+      content: "An error occurred while processing your request.",
+      role: "assistant",
+      conversationId,
       timestamp: Date.now(),
     }, tabId)
   }
@@ -150,7 +232,7 @@ async function deleteConversation(conversationId: string) {
   })
 
   await Promise.all(
-    result.docs.map(doc => 
+    result.docs.map(doc =>
       messagesDb.remove(doc._id!, doc._rev!)
     )
   )
@@ -167,8 +249,8 @@ export default defineBackground(() => {
 
     if (request.type === "delete_conversation") {
       deleteConversation(request.conversationId).then(result => {
-        chrome.runtime.sendMessage({ 
-          type: "conversation_deleted", 
+        chrome.runtime.sendMessage({
+          type: "conversation_deleted",
           conversationId: request.conversationId,
           success: result.success
         })
