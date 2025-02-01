@@ -1,89 +1,27 @@
 import '../styles.css'
 import React from "react"
 import { createRoot } from 'react-dom/client'
-import { useState, useEffect, useRef } from "react"
-import { v4 as uuidv4 } from 'uuid'
-import PouchDB from "pouchdb"
-import PouchDBFind from 'pouchdb-find'
-import PouchDBIDB from 'pouchdb-adapter-indexeddb'
-import { Message, messagesDb } from '@/common/db'
+import { useRef } from "react"
 import ReactMarkdown from 'react-markdown'
-
-PouchDB.plugin(PouchDBIDB)
-PouchDB.plugin(PouchDBFind)
-
-// Create index for timestamp
-messagesDb.createIndex({
-  index: {
-    fields: ['timestamp', 'conversationId'],
-    ddoc: 'timestamp-index'
-  }
-}).catch(err => console.error('Error creating index:', err))
-
-interface Conversation {
-  id: string
-  preview: string
-  lastMessageAt: string
-}
+import { useMessaging } from '@/common/hooks/useMessaging'
 
 function Popup() {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [input, setInput] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [currentConversationId, setCurrentConversationId] = useState(uuidv4())
+  const {
+    messages,
+    input,
+    setInput,
+    isLoading,
+    currentConversationId,
+    conversations,
+    handleSubmit,
+    deleteConversation: deleteConversationBase,
+    selectConversation: selectConversationBase,
+    startNewConversation
+  } = useMessaging()
+
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
-  const [conversations, setConversations] = useState<Conversation[]>([])
   const drawerRef = useRef<HTMLDivElement>(null)
   const hamburgerRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    // Load latest conversation first
-    const loadLatestConversation = async () => {
-      try {
-        const result = await messagesDb.find({
-          selector: {
-            timestamp: { $gt: null },
-            conversationId: { $gt: null }
-          },
-          fields: ['conversationId', 'timestamp'],
-          sort: [{ timestamp: 'desc' }],
-          limit: 1
-        })
-
-        if (result.docs.length > 0) {
-          setCurrentConversationId(result.docs[0].conversationId)
-        }
-      } catch (error) {
-        console.error('Error loading latest conversation:', error)
-      }
-    }
-
-    loadLatestConversation()
-  }, [])
-
-  useEffect(() => {
-    // Manages message handling, conversation state, and cleanup
-    loadConversations()
-    loadSavedMessages(currentConversationId)
-
-    const messageListener = (message: any) => {
-      console.log("message: ", message)
-      if (message.type === "chat_response") {
-        loadSavedMessages(currentConversationId)
-        setIsLoading(false)
-      } else if (message.type === "conversation_deleted") {
-        if (message.success) {
-          if (currentConversationId === message.conversationId) {
-            startNewConversation()
-          }
-          loadConversations()
-        }
-      }
-    }
-
-    chrome.runtime.onMessage.addListener(messageListener)
-    return () => chrome.runtime.onMessage.removeListener(messageListener)
-  }, [currentConversationId])
 
   useEffect(() => {
     // Handles click-outside behavior for the drawer component
@@ -101,98 +39,14 @@ function Popup() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  useEffect(() => {
-    // Loads conversations when the drawer is opened
-    if (isDrawerOpen) {
-      loadConversations()
-    }
-  }, [isDrawerOpen])
-
-  async function loadConversations() {
-    try {
-      const result = await messagesDb.find({
-        selector: {
-          timestamp: { $gt: null },
-          conversationId: { $gt: null }
-        },
-        fields: ['_id', 'conversationId', 'timestamp', 'content'],
-        sort: [{ timestamp: 'desc' }]
-      })
-      
-      const conversationMap = new Map<string, { preview: string; lastMessageAt: string }>()
-      
-      result.docs.forEach(message => {
-        if (!conversationMap.has(message.conversationId)) {
-          conversationMap.set(message.conversationId, {
-            preview: message.content,
-            lastMessageAt: new Date(message.timestamp).toISOString()
-          })
-        }
-      })
-
-      const conversations = Array.from(conversationMap.entries()).map(([id, data]) => ({
-        id,
-        preview: data.preview,
-        lastMessageAt: data.lastMessageAt
-      }))
-
-      setConversations(conversations)
-    } catch (error) {
-      console.error('Error loading conversations:', error)
-    }
-  }
-
   const selectConversation = (conversationId: string) => {
-    setCurrentConversationId(conversationId)
+    selectConversationBase(conversationId)
     setIsDrawerOpen(false)
-  }
-
-  async function loadSavedMessages(conversationId: string) {
-    try {
-      const result = await messagesDb.find({
-        selector: {
-          conversationId: conversationId
-        },
-      })
-      setMessages(result.docs)
-    } catch (error) {
-      console.error('Error loading messages:', error)
-    }
-  }
-
-  const startNewConversation = () => {
-    const newConversationId = uuidv4()
-    setCurrentConversationId(newConversationId)
-    setMessages([])
-    loadSavedMessages(newConversationId)
-  }
-
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!input.trim()) return
-
-    setIsLoading(true)
-    setInput("")
-    setMessages(prev => [...prev, {
-      content: input,
-      conversationId: currentConversationId,
-      role: "user",
-      timestamp: Date.now()
-    }])
-
-    chrome.runtime.sendMessage({ 
-      type: "chat", 
-      message: input,
-      conversationId: currentConversationId
-    })
   }
 
   const deleteConversation = (conversationId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    chrome.runtime.sendMessage({
-      type: "delete_conversation",
-      conversationId
-    })
+    deleteConversationBase(conversationId)
   }
 
   return (

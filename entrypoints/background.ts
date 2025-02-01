@@ -81,10 +81,15 @@ async function handleChat(message: string, conversationId: string, tabId?: numbe
 
     const result = await generateText({
       model: openai("gpt-4o-mini"),
+      maxSteps: 20,
       system: `
-It is ${new Date().toISOString()}. You are in Canada. You are a friendly browser assistant. Your job is to assist the user with perform tasks in the browser, such as booking a flight, or finding a restaurant, etc...
+It is ${new Date().toISOString()}. You are in Canada. Your name is Browsy, a friendly browser assistant. 
+Your job is to assist the user with perform tasks in the browser, such as booking a flight, or finding a restaurant, etc...
 You think through your actions one step at a time, and act accordingly to each step.
 Use the tools available for you tonavigate, perform actions and collect relevant information from the webpage.
+Go ahead and perform navigations and actions without user input. Only ask for input for critical actions such as submitting payments.
+Go ahead and use your judgement to perform actions until the goal is achieved.
+When asked a general question, use your tools to navigate and interact with the web to find the answer.
 `,
       tools: {
         getCurrentTabContent: tool({
@@ -106,26 +111,8 @@ Use the tools available for you tonavigate, perform actions and collect relevant
             }
           }
         }),
-        planStrategy: tool({
-          description: "Use this tool to get a plan of how you will perform a task",
-          parameters: z.object({
-            task: z.string().describe("The task you are trying to perform"),
-          }),
-          execute: async ({ task }) => {
-            const { object: { plan } } = await generateObject({
-              model: openai("gpt-4o-mini"),
-              schema: z.object({
-                plan: z.array(z.string()).describe("The sequential steps to take").max(10)
-              }),
-              system: `
-You are a component of a browser assia
-`
-            })
-            return plan
-          }
-        }),
         decideAction: tool({
-          description: "Use this tool to decide which action to take next",
+          description: "Use this tool to decide which action to take next on the webpage.",
           parameters: z.object({
             pageContent: z.string().describe("The content of the page"),
             request: z.string().describe("The request you are trying to fulfill"),
@@ -133,7 +120,6 @@ You are a component of a browser assia
               text: z.string().optional(),
               xpath: z.string(),
               tag: z.string(),
-              attributes: z.record(z.string()),
             })).describe("Interactive elements identified by the getInteractiveElements tool.")
           }),
           execute: async ({ pageContent, request }) => {
@@ -194,12 +180,12 @@ ${pageContent}
             }
           }
         }),
-        navigateToUrl: tool({
-          description: "Use this tool to navigate to a URL",
+        navigateToPage: tool({
+          description: "Use this tool to navigate to a top level",
           parameters: z.object({
-            url: z.string().describe("The URL to navigate to"),
+            baseUrl: z.string().describe("The base level URL of a webpage (ex: https://google.com, https://amazon.ca, etc...) "),
           }),
-          execute: async ({ url }) => {
+          execute: async ({ baseUrl: url }) => {
             const activeTab = await getActiveTab();
             if (!activeTab) return "No active tab"
             try {
@@ -224,7 +210,6 @@ ${pageContent}
         role: msg.role === 'function' ? 'tool' : msg.role,
         content: msg.content,
       })) as AiMessage[],
-      maxSteps: 20,
       onStepFinish: (step) => {
       }
     })
