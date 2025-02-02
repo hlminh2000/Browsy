@@ -4,8 +4,8 @@ import { getModel } from "./settings";
 import memoize from "lodash/memoize";
 import { z } from "zod";
 import "@tensorflow/tfjs-backend-webgl";
-// import { TensorFlowEmbeddings } from "@langchain/community/embeddings/tensorflow";
-import { HuggingFaceTransformersEmbeddings } from "@langchain/community/embeddings/huggingface_transformers";
+import { loadLocalLlm } from "./localLlm";
+import { HumanMessage } from "@langchain/core/messages";
 
 const loadEmbeddingModel = memoize(async () => {
   const { load } = await import('@tensorflow-models/universal-sentence-encoder');
@@ -16,11 +16,6 @@ const loadEmbeddingModel = memoize(async () => {
 })
 
 async function embeddingFromText(text: string) {
-  // const embeddings = new HuggingFaceTransformersEmbeddings();
-  // await import("@tensorflow/tfjs-backend-webgl")
-  // const { TensorFlowEmbeddings } = await import("@langchain/community/embeddings/tensorflow")
-
-  // const embeddings = new TensorFlowEmbeddings();
   const model = await loadEmbeddingModel()
   const [vector] = await (await model.embed(text)).array();
   return vector;
@@ -40,11 +35,11 @@ const createVectorDb = <Metadata = {}>({ dbName }: { dbName: string }) => {
   }
 
   return {
-    query: async (queryStr: string, options: QueryOptions) =>
+    query: async (queryStr: string, options?: QueryOptions) =>
       db.query(await embeddingFromText(queryStr), options),
     insert: async (content: string, metadata?: Metadata) =>
       db.insert({ vector: await embeddingFromText(content), content, metadata } as Doc),
-    delete: db.delete,
+    delete: (...args: Parameters<typeof db.delete>) => db.delete(...args),
     update: db.update,
   }
 }
@@ -107,38 +102,58 @@ ${messages.map(({ role, content }) => `${role}: ${content}`).join("\n")}
     return object.summary
   }
 
-  const addEpisodicMemory = async (args: { conversationId: string, messages: {role: string, content: string}[] }) => {
+  const updateEpisodicMemory = async (args: { conversationId: string, messages: { role: string, content: string }[] }) => {
     const { conversationId } = args
-    const memory = await generateEpisodicMemory(args)
-    await episodicMemoryStore.insert(memory.context, memory)
-  }
-
-  const queryEpisodicMemory = async (args: { conversationSummary: string }) => {
-    const { conversationSummary } = args;
-    const result = await episodicMemoryStore.query(conversationSummary, { limit: 3 })
-    return result.map((result) => ({ ...result, object: result.object as EpisodicMemory }))
-  }
-
-  const updateEpisodicMemory = async (args: { 
-    conversationId: string, 
-    conversationSummary: string, 
-    memory: EpisodicMemory 
-  }) => {
-    const { conversationId, memory, conversationSummary } = args;
-    const [result] = await queryEpisodicMemory({ conversationSummary })
-    if (result?.object?.conversationId === conversationId) {
-      await episodicMemoryStore.update(result?.key, { ...memory, conversationId })
+    const [memory, localLlm] = await Promise.all([generateEpisodicMemory(args), loadLocalLlm()])
+    const matchingMemories = (await episodicMemoryStore.query(memory.context))
+      .filter(result => result.similarity >= 0.7)
+    const combined = [
+      ...matchingMemories.map(result => result.object as EpisodicMemory), 
+      memory
+    ]
+    const [summarizedContext, summarizedGoodPoints, summarizedImprovementPoints] = await Promise.all([
+      localLlm.invoke([new HumanMessage({
+        content: `
+          Summarize the following points into one sentence that captures all points:
+          ${combined.map(mem => `- ${mem.context}`).join("\n")}
+        `
+      })]).then(result => result.content as string),
+      localLlm.invoke([new HumanMessage({
+        content: `
+          Summarize the following points into one sentence that captures all points:
+          ${combined.map(mem => `- ${mem.good}`).join("\n")}
+        `
+      })]).then(result => result.content as string),
+      localLlm.invoke([new HumanMessage({
+        content: `
+          Summarize the following points into one sentence that captures all points:
+          ${combined.map(mem => `- ${mem.toBeImproved}`).join("\n")}
+        `
+      })]).then(result => result.content as string)
+    ])
+    const combinedMemory: EpisodicMemory = {
+      conversationId,
+      context: summarizedContext,
+      good: summarizedGoodPoints,
+      toBeImproved: summarizedImprovementPoints
     }
+    for (const mem of matchingMemories) {
+      episodicMemoryStore.delete(mem.key)
+    }
+    await episodicMemoryStore.insert(combinedMemory.context, combinedMemory)
+  }
+
+  const queryEpisodicMemory = async (args: { query: string }) => {
+    const { query } = args;
+    const result = await episodicMemoryStore.query(query, { limit: 10 })
+    return result
+      .map((result) => ({ ...result, object: result.object as EpisodicMemory }))
   }
 
   return {
     generateConversationSummary,
     generateEpisodicMemory,
-    addEpisodicMemory,
-    queryEpisodicMemory,
-    updateEpisodicMemory
+    updateEpisodicMemory,
+    queryEpisodicMemory
   }
 })
-
-// export const episodicMemory = createVectorDb<{ conversationId: string }>({dbName: "episodicMemory" })
-// export const semanticVectorIndex = createVectorDb<{ conversationId: string }>({dbName: "episodicMemory" })

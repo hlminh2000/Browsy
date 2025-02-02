@@ -3,6 +3,7 @@ import { z } from "zod"
 import { Message, messagesDb } from "@/common/db"
 import { getModel, getSettingByType } from "@/common/settings";
 import { getMemoryManager } from "@/common/memory";
+import { loadLocalLlm } from "@/common/localLlm";
 
 async function getConversationMessages(conversationId: string): Promise<Message[]> {
   const result = await messagesDb.find({
@@ -55,9 +56,7 @@ async function handleChat(message: string, conversationId: string, tabId?: numbe
       { role: "user" as const, content: message }
     ]
     const memory = await getMemoryManager();
-    const pastMemories = await memory.queryEpisodicMemory({
-      conversationSummary: await memory.generateConversationSummary({ messages })
-    })
+    const pastMemories = await memory.queryEpisodicMemory({ query: message })
 
     const result = await generateText({
       model,
@@ -196,22 +195,7 @@ ${pageContent}
       })) as AiMessage[]
     })
 
-    const conversationSummary = await memory.generateConversationSummary({
-      messages: [...messages, { role: "assistant", content: result.text}]
-    })
-    const [matchingMemory] = await memory.queryEpisodicMemory({
-      conversationSummary
-    })
-    console.log("matchingMemory: ", matchingMemory)
-    if (matchingMemory?.similarity >= 0.8) {
-      await memory.updateEpisodicMemory({
-        conversationId,
-        conversationSummary,
-        memory: await memory.generateEpisodicMemory({ messages, conversationId })
-      })
-    } else {
-      memory.addEpisodicMemory({ conversationId, messages })
-    }
+    memory.updateEpisodicMemory({ conversationId, messages })
 
     await saveMessage({
       content: result.text,
@@ -270,6 +254,8 @@ async function deleteConversation(conversationId: string) {
 }
 
 export default defineBackground(() => {
+  loadLocalLlm()
+
   chrome.runtime.onInstalled.addListener(() => {
     chrome.sidePanel.setOptions({ path: "sidepanel.html" });
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
