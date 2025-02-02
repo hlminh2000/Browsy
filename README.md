@@ -12,7 +12,7 @@ Meet Browsy, your friendly and intelligent browser assistant that's always ready
 - 🔒 Keep your conversations and settings private
 
 ## Demo
-https://github.com/hlminh2000/Browsy/issues/1
+https://github.com/user-attachments/assets/2eae9cdc-77bf-4275-a21b-938f723edfd0
 
 ## Installation
 
