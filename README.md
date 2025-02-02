@@ -1,15 +1,18 @@
-# Browsy - Your AI Browser Assistant
+# Browsy - Your Personal Browser Companion
 
-Browsy is a powerful Chrome extension that brings AI-powered browsing assistance directly to your browser. Built with React and WXT, it helps you perform various browser tasks efficiently using natural language commands.
+Meet Browsy, your friendly and intelligent browser assistant that's always ready to help. This Chrome extension understands natural conversations and assists you with your daily browsing needs, making your online experience more personal and effortless.
 
-## Features
+## What Browsy Can Do For You
 
-- 🤖 AI-powered browser automation
-- 💬 Natural language interaction
-- 🔒 Secure local storage of settings
-- 🎯 Task automation (booking flights, finding restaurants, etc.)
-- 🔄 Conversation history management
-- 🌐 Seamless webpage interaction
+- 💬 Chat naturally about what you need help with
+- 🔍 Find information and answers while you browse
+- 🎯 Help with daily browsing needs
+- 🧠 Remember your preferences and improves overtime
+- 🤝 Work alongside you on any webpage
+- 🔒 Keep your conversations and settings private
+
+## Demo
+[![Watch the video](./doc_assets/thumbnail.png)](https://raw.githubusercontent.com/hlminh2000/b/main/doc_assets/demo.mp4)
 
 ## Installation
 
@@ -36,7 +39,6 @@ Browsy is a powerful Chrome extension that brings AI-powered browsing assistance
 4. Save the settings
 
 ## Development
-
 ### Prerequisites
 
 - Node.js
