@@ -77,11 +77,9 @@ pnpm compile
 - WXT - Modern Chrome Extension Framework
 
 ### AI & Machine Learning
-- OpenAI API - For natural language processing
-- LangChain - For AI/LLM application framework
-- Vercel AI SDK - For simple agent implementation
-- Transformers - For text embeddings and processing
-- Web-llm - Local llm inference for small tasks
+- OpenAI + Vercel AI SDK - For agent implementation
+- LangChain + WebLLM - For local LLM inference for small tasks
+- Transformers - For local text embeddings
 
 ### Storage & State Management
 - PouchDB - For efficient local data storage
