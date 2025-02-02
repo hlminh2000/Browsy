@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { useRef } from "react"
 import ReactMarkdown from 'react-markdown'
 import { useMessaging } from '@/common/hooks/useMessaging'
+import { settingsDb, SupportedLlmModel } from '@/common/db'
 
 function Popup() {
   const {
@@ -27,7 +28,7 @@ function Popup() {
     // Handles click-outside behavior for the drawer component
     function handleClickOutside(event: MouseEvent) {
       if (
-        drawerRef.current && 
+        drawerRef.current &&
         !drawerRef.current.contains(event.target as Node) &&
         !hamburgerRef.current?.contains(event.target as Node)
       ) {
@@ -49,13 +50,37 @@ function Popup() {
     deleteConversationBase(conversationId)
   }
 
+  const [selectedLlmModel, setSelectedLlmModel] = useState<SupportedLlmModel | null>(null);
+  useEffect(() => {
+    const loadModel = async () => {
+      const { docs: [doc] } = await settingsDb.find({ selector: { type: 'model' } })
+      if (doc) {
+        setSelectedLlmModel(doc.value as SupportedLlmModel)
+      } else {
+        await settingsDb.post({ value: "gpt-4o-mini", type: "model" })
+        setSelectedLlmModel("gpt-4o-mini")
+      }
+    }
+    loadModel()
+  }, [])
+  const onModelChange: React.ChangeEventHandler<HTMLSelectElement> = async (e) => {
+    const model = e.target.value as SupportedLlmModel
+    const { docs: [doc] } = await settingsDb.find({ selector: { type: 'model' } })
+    if (doc) {
+      settingsDb.put({ ...doc, llmModel: model })
+    } else {
+      settingsDb.put({ type: "model", value: model })
+    }
+    setSelectedLlmModel(model)
+  }
+
   return (
     <div className="w-full h-full flex flex-col bg-gray-50 relative">
       {/* Header */}
       <div className="px-4 py-3 bg-white border-b border-gray-200 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <button 
+            <button
               ref={hamburgerRef}
               onClick={(e) => {
                 e.stopPropagation()
@@ -67,15 +92,26 @@ function Popup() {
                 <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
               </svg>
             </button>
-            <button 
+            <button
               onClick={startNewConversation}
               className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-100 transition-colors"
             >
-              New Chat
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" />
+              </svg>
             </button>
+            <select
+              className="px-3 py-1.5 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              value={selectedLlmModel || "gpt-4o-mini" as SupportedLlmModel}
+              onChange={onModelChange}
+            >
+              {/* <option value="claude-3.5-sonnet">Claude 3 Sonnet</option> */}
+              <option value="gpt-4o">GPT 4o</option>
+              <option value="gpt-4o-mini">GPT 4o Mini</option>
+            </select>
           </div>
-          <button 
-            onClick={() => chrome.runtime.openOptionsPage()} 
+          <button
+            onClick={() => chrome.runtime.openOptionsPage()}
             className="flex items-center gap-1.5 p-2 text-sm text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-100 transition-colors"
             title="Open Settings"
           >
@@ -87,7 +123,7 @@ function Popup() {
       </div>
 
       {/* Drawer */}
-      <div 
+      <div
         ref={drawerRef}
         className={`
           absolute top-[57px] left-0 w-64 h-[calc(100%-57px)] 
@@ -100,21 +136,19 @@ function Popup() {
           {conversations.map(conv => (
             <div
               key={conv.id}
-              className={`group relative rounded-lg transition-colors ${
-                conv.id === currentConversationId
-                  ? "bg-blue-50"
-                  : "hover:bg-gray-50"
-              }`}
+              className={`group relative rounded-lg transition-colors ${conv.id === currentConversationId
+                ? "bg-blue-50"
+                : "hover:bg-gray-50"
+                }`}
             >
               <button
                 onClick={() => selectConversation(conv.id)}
                 className="w-full p-3 text-left"
               >
-                <p className={`text-sm font-medium truncate ${
-                  conv.id === currentConversationId
-                    ? "text-blue-600"
-                    : "text-gray-700"
-                }`}>{conv.preview}</p>
+                <p className={`text-sm font-medium truncate ${conv.id === currentConversationId
+                  ? "text-blue-600"
+                  : "text-gray-700"
+                  }`}>{conv.preview}</p>
                 <p className="text-xs text-gray-500 mt-1">
                   {new Date(conv.lastMessageAt).toLocaleDateString()}
                 </p>
@@ -137,7 +171,7 @@ function Popup() {
 
       {/* Backdrop */}
       {isDrawerOpen && (
-        <div 
+        <div
           className="absolute inset-0 bg-black bg-opacity-25 z-0 
             transition-opacity duration-200 ease-in-out"
           style={{ marginTop: '57px' }}
@@ -154,8 +188,8 @@ function Popup() {
             <div
               className={`
                 max-w-[80%] px-4 py-2 rounded-2xl
-                ${message.role === "user" 
-                  ? "bg-blue-500 text-white" 
+                ${message.role === "user"
+                  ? "bg-blue-500 text-white"
                   : "bg-white border border-gray-200"
                 }
                 shadow-sm prose prose-sm max-w-none

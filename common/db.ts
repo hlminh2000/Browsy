@@ -46,11 +46,12 @@ messagesDb.createIndex({
   }
 }).catch(err => console.error('Error creating index:', err))
 
+export type SupportedLlmModel = "gpt-4o" | "gpt-4o-mini"
 export interface Settings {
   _id?: string
   _rev?: string
-  type: 'settings'
-  apiKey: string
+  type: 'apiKey' | "model"
+  value: string,
 }
 
 export const settingsDb = new PouchDB<Settings>("settings", {

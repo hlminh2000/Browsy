@@ -70,7 +70,11 @@ function getInteractiveElements() {
       //     obj[attr.name] = attr.value;
       //     return obj;
       //   }, {} as Record<string, string>)
-    }));
+    }))
+    .reduce((acc, obj) => {
+      acc[obj.xpath] = obj
+      return acc
+    }, {} as Record<string, any>);
 }
 
 export default defineContentScript({
@@ -95,8 +99,9 @@ export default defineContentScript({
           XPathResult.FIRST_ORDERED_NODE_TYPE,
           null
         ).singleNodeValue as HTMLElement
+        if (!element) return sendResponse("Could not perform the action")
         if (action === "click") {
-          element.click()
+          element?.click()
         } else if (action === "type") {
           (element as HTMLInputElement).value = ""
           await new Promise(resolve => setTimeout(resolve, 100))

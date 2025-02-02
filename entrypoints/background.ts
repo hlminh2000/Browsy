@@ -1,13 +1,8 @@
-import { createOpenAI } from "@ai-sdk/openai"
-import { generateText, tool, Message as AiMessage, generateObject } from "ai"
-import PouchDB from "pouchdb"
-import PouchDBFind from 'pouchdb-find'
-import PouchDBIDB from 'pouchdb-adapter-indexeddb'
+import { generateText, tool, Message as AiMessage } from "ai"
 import { z } from "zod"
-import { Message, messagesDb, settingsDb } from "@/common/db"
-
-PouchDB.plugin(PouchDBIDB)
-PouchDB.plugin(PouchDBFind)
+import { Message, messagesDb } from "@/common/db"
+import { getModel, getSettingByType } from "@/common/settings";
+import { getMemoryManager } from "@/common/memory";
 
 async function getConversationMessages(conversationId: string): Promise<Message[]> {
   const result = await messagesDb.find({
@@ -21,23 +16,6 @@ async function getConversationMessages(conversationId: string): Promise<Message[
   return result.docs
 }
 
-async function getApiKey(): Promise<string | null> {
-  try {
-    const result = await settingsDb.find({
-      selector: {
-        type: 'settings'
-      }
-    })
-
-    if (result.docs.length > 0) {
-      return result.docs[0].apiKey
-    }
-    return null
-  } catch (error) {
-    console.error("Error getting API key:", error)
-    return null
-  }
-}
 
 const getActiveTab = async () => {
   const currentWindow = await chrome.windows.getCurrent()
@@ -47,7 +25,7 @@ const getActiveTab = async () => {
 
 async function handleChat(message: string, conversationId: string, tabId?: number) {
   try {
-    const apiKey = await getApiKey()
+    const [apiKey, model] = await Promise.all([ getSettingByType("apiKey"), getModel() ])
 
     // Save user message first
     await saveMessage({
@@ -68,8 +46,6 @@ async function handleChat(message: string, conversationId: string, tabId?: numbe
       return
     }
 
-    const openai = createOpenAI({ apiKey })
-
     // Get conversation history
     const messages = [
       ...(await getConversationMessages(conversationId)).map(msg => ({
@@ -78,10 +54,14 @@ async function handleChat(message: string, conversationId: string, tabId?: numbe
       })),
       { role: "user" as const, content: message }
     ]
+    const memory = await getMemoryManager();
+    const pastMemories = await memory.queryEpisodicMemory({
+      conversationSummary: await memory.generateConversationSummary({ messages })
+    })
 
     const result = await generateText({
-      model: openai("gpt-4o-mini"),
-      maxSteps: 20,
+      model,
+      maxSteps: 10,
       system: `
 It is ${new Date().toISOString()}. You are in Canada. Your name is Browsy, a friendly browser assistant. 
 Your job is to assist the user with perform tasks in the browser, such as booking a flight, or finding a restaurant, etc...
@@ -90,6 +70,11 @@ Use the tools available for you tonavigate, perform actions and collect relevant
 Go ahead and perform navigations and actions without user input. Only ask for input for critical actions such as submitting payments.
 Go ahead and use your judgement to perform actions until the goal is achieved.
 When asked a general question, use your tools to navigate and interact with the web to find the answer.
+
+=================
+Below are some relevant memories about similar conversations. Consider these for this conversation:
+${pastMemories.map(memory => memory.object)}
+=================
 `,
       tools: {
         getCurrentTabContent: tool({
@@ -101,7 +86,6 @@ When asked a general question, use your tools to navigate and interact with the 
             if (!tabs.length) return "No active tab"
             const [{ id: tabId }] = tabs
             if (!tabId) return "Invalid tab ID"
-
             try {
               const pageContent = await chrome.tabs.sendMessage(tabId, { type: "get_page_content" })
               return pageContent
@@ -124,7 +108,7 @@ When asked a general question, use your tools to navigate and interact with the 
           }),
           execute: async ({ pageContent, request }) => {
             const { text } = await generateText({
-              model: openai("gpt-4o-mini"),
+              model,
               system: `
 You are an expert model specialized in deciding which action to take next on a webpage, based on a user's request.
 Do not perform the task, only provide the appropriate step to take. 
@@ -209,10 +193,25 @@ ${pageContent}
       messages: messages.map(msg => ({
         role: msg.role === 'function' ? 'tool' : msg.role,
         content: msg.content,
-      })) as AiMessage[],
-      onStepFinish: (step) => {
-      }
+      })) as AiMessage[]
     })
+
+    const conversationSummary = await memory.generateConversationSummary({
+      messages: [...messages, { role: "assistant", content: result.text}]
+    })
+    const [matchingMemory] = await memory.queryEpisodicMemory({
+      conversationSummary
+    })
+    console.log("matchingMemory: ", matchingMemory)
+    if (matchingMemory?.similarity >= 0.8) {
+      await memory.updateEpisodicMemory({
+        conversationId,
+        conversationSummary,
+        memory: await memory.generateEpisodicMemory({ messages, conversationId })
+      })
+    } else {
+      memory.addEpisodicMemory({ conversationId, messages })
+    }
 
     await saveMessage({
       content: result.text,

@@ -2,23 +2,7 @@ import '../styles.css'
 import React from "react"
 import { createRoot } from 'react-dom/client'
 import { useState, useEffect } from "react"
-import PouchDB from "pouchdb"
-import PouchDBFind from 'pouchdb-find'
-import PouchDBIDB from 'pouchdb-adapter-indexeddb'
-
-PouchDB.plugin(PouchDBIDB)
-PouchDB.plugin(PouchDBFind)
-
-interface Settings {
-  _id?: string
-  _rev?: string
-  type: 'settings'
-  apiKey: string
-}
-
-const db = new PouchDB<Settings>("settings", {
-  adapter: 'indexeddb'
-})
+import { settingsDb } from '@/common/db'
 
 function Options() {
   const [apiKey, setApiKey] = useState("")
@@ -31,14 +15,9 @@ function Options() {
 
   async function loadSettings() {
     try {
-      const result = await db.find({
-        selector: {
-          type: 'settings'
-        }
-      })
-      
+      const result = await settingsDb.find({ selector: { type: 'apiKey' } })
       if (result.docs.length > 0) {
-        setApiKey(result.docs[0].apiKey)
+        setApiKey(result.docs[0].value)
       }
     } catch (error) {
       console.error("Error loading settings:", error)
@@ -52,24 +31,16 @@ function Options() {
 
     try {
       // Try to find existing settings
-      const result = await db.find({
-        selector: {
-          type: 'settings'
-        }
-      })
+      const result = await settingsDb.find({ selector: { type: 'apiKey' } })
 
       if (result.docs.length > 0) {
         // Update existing settings
-        await db.put({
+        await settingsDb.put({
           ...result.docs[0],
-          apiKey
+          value: apiKey,
         })
       } else {
-        // Create new settings
-        await db.post({
-          type: 'settings',
-          apiKey
-        })
+        await settingsDb.post({ type: 'apiKey', value: apiKey })
       }
 
       setSaveStatus('success')
