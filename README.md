@@ -70,13 +70,19 @@ pnpm compile
 
 ## Tech Stack
 
-- React
-- TypeScript
-- WXT (Chrome Extension Framework)
-- TailwindCSS
-- PouchDB (for local storage)
-- OpenAI API
+### Frontend
+- React - UI framework
+- TypeScript - Type-safe JavaScript
+- TailwindCSS - Utility-first CSS framework
+- WXT - Modern Chrome Extension Framework
 
-## License
+### AI & Machine Learning
+- OpenAI API - For natural language processing
+- LangChain - For AI/LLM application framework
+- Vercel AI SDK - For simple agent implementation
+- Transformers - For text embeddings and processing
+- Web-llm - Local llm inference for small tasks
 
-MIT
+### Storage & State Management
+- PouchDB - For efficient local data storage
+- IndexedDB - For vector storage
