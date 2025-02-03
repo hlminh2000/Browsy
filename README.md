@@ -1,8 +1,9 @@
-# Browsy - Your Personal Browser Companion
 
 <p align="center">
   <img src="doc_assets/browsy.png" alt="Browsy Icon" width="128" height="128">
 </p>
+
+# Browsy - Your Personal Browser Companion
 
 Browsy is your friendly and intelligent browser assistant that's always ready to help. This Chrome extension understands natural conversations and assists you with your daily browsing needs, making your online experience more personal and effortless.
 
