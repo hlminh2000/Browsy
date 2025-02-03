@@ -5,6 +5,33 @@ import { getModel, getSettingByType } from "@/common/settings";
 import { getMemoryManager } from "@/common/memory";
 import { loadLocalLlm } from "@/common/localLlm";
 
+export default defineBackground(() => {
+  loadLocalLlm()
+
+  chrome.runtime.onInstalled.addListener(() => {
+    chrome.sidePanel.setOptions({ path: "sidepanel.html" });
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  });
+
+  chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
+    if (request.type === "chat") {
+      await handleChat(request.message, request.conversationId, sender.tab?.id)
+      return true
+    }
+
+    if (request.type === "delete_conversation") {
+      deleteConversation(request.conversationId).then(result => {
+        chrome.runtime.sendMessage({
+          type: "conversation_deleted",
+          conversationId: request.conversationId,
+          success: result.success
+        })
+      })
+      return true
+    }
+  })
+});
+
 async function getConversationMessages(conversationId: string): Promise<Message[]> {
   const result = await messagesDb.find({
     selector: {
@@ -252,30 +279,3 @@ async function deleteConversation(conversationId: string) {
 
   return { success: true }
 }
-
-export default defineBackground(() => {
-  loadLocalLlm()
-
-  chrome.runtime.onInstalled.addListener(() => {
-    chrome.sidePanel.setOptions({ path: "sidepanel.html" });
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  });
-
-  chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
-    if (request.type === "chat") {
-      await handleChat(request.message, request.conversationId, sender.tab?.id)
-      return true
-    }
-
-    if (request.type === "delete_conversation") {
-      deleteConversation(request.conversationId).then(result => {
-        chrome.runtime.sendMessage({
-          type: "conversation_deleted",
-          conversationId: request.conversationId,
-          success: result.success
-        })
-      })
-      return true
-    }
-  })
-});
