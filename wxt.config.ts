@@ -5,12 +5,7 @@ export default defineConfig({
   extensionApi: 'chrome',
   modules: ['@wxt-dev/module-react'],
   manifest: {
-    permissions: [
-      'storage', 
-      'indexedDB',
-      'sidePanel'
-    ],
-    define: { global: "window" },
+    permissions: [ 'sidePanel' ],
     options_ui: {
       page: "options.html",
       open_in_tab: true
