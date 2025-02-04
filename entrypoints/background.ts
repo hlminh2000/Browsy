@@ -8,7 +8,8 @@ import { loadLocalLlm } from "@/common/localLlm";
 export default defineBackground(() => {
   loadLocalLlm()
 
-  chrome.runtime.onInstalled.addListener(() => {
+  chrome.runtime.onInstalled.addListener(async () => {
+    await loadLocalLlm()
     chrome.sidePanel.setOptions({ path: "sidepanel.html" });
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   });
