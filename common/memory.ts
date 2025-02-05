@@ -7,7 +7,7 @@ import "@tensorflow/tfjs-backend-webgl";
 import { loadLocalLlm } from "./localLlm";
 import { HumanMessage } from "@langchain/core/messages";
 
-const loadEmbeddingModel = memoize(async () => {
+export const loadEmbeddingModel = memoize(async () => {
   const { load } = await import('@tensorflow-models/universal-sentence-encoder');
   const tf = await import('@tensorflow/tfjs-core');
   // Required for Chrome Extension environment

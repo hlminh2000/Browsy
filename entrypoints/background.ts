@@ -2,16 +2,24 @@ import { generateText, tool, Message as AiMessage } from "ai"
 import { z } from "zod"
 import { Message, messagesDb } from "@/common/db"
 import { getModel, getSettingByType } from "@/common/settings";
-import { getMemoryManager } from "@/common/memory";
+import { getMemoryManager, loadEmbeddingModel } from "@/common/memory";
 import { loadLocalLlm } from "@/common/localLlm";
 
 export default defineBackground(() => {
-  loadLocalLlm()
 
-  chrome.runtime.onInstalled.addListener(async () => {
-    await loadLocalLlm()
-    chrome.sidePanel.setOptions({ path: "sidepanel.html" });
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  chrome.runtime.onInstalled.addListener(async (e) => {
+    await chrome.runtime.openOptionsPage()
+    await Promise.all([
+      loadEmbeddingModel(),
+      loadLocalLlm(),
+    ])
+    await Promise.all([
+      chrome.sidePanel.setOptions({ path: "sidepanel.html" }),
+      chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+    ])
+    await chrome.sidePanel.open({
+      windowId: (await chrome.windows.getCurrent()).id as number
+    })
   });
 
   chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {

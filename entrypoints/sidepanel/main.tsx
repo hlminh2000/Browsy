@@ -69,7 +69,7 @@ function Popup() {
     if (doc) {
       settingsDb.put({ ...doc, llmModel: model })
     } else {
-      settingsDb.put({ type: "model", value: model })
+      settingsDb.post({ type: "model", value: model })
     }
     setSelectedLlmModel(model)
   }
